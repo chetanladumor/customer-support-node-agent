@@ -29,3 +29,5 @@ client/dist/
 client/node_modules/
 
 /src/generated/prisma
+coverage/
+scratch/
