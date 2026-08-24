@@ -1,0 +1,201 @@
+// ---------------------------------------------------------------------------
+// Prisma Schema — Node AI Customer Support
+// ---------------------------------------------------------------------------
+// Database: PostgreSQL 16 with pgvector extension
+// This schema defines all tables for the customer support platform:
+//   - Users, Conversations, Messages (chat system)
+//   - Orders, OrderItems (order management)
+//   - Invoices (billing system)
+//   - KnowledgeBase (FAQ/policy articles — will get pgvector in Phase 8)
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  user
+  assistant
+  system
+  tool
+}
+
+enum AgentType {
+  ROUTER
+  SUPPORT
+  ORDER
+  BILLING
+  FALLBACK
+  GREETING
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String
+  phone         String?
+  address       String?
+  country       String         @default("US") // New Field: For regional routing/filtering
+  tenantId      String         @default("default_tenant") // New Field: Multi-tenant support
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+  orders        Order[]
+  invoices      Invoice[]
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String    @default("New Support Ticket")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           Role
+  content        String       @db.Text
+  agentType      AgentType?
+  reasoningSteps Json?
+  toolCalls      Json?
+  metadata       Json?        // NEW: stores ConversationState for follow-up tracking (Fix #4)
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  orderNumber       String      @unique
+  userId            String
+  status            OrderStatus @default(PROCESSING)
+  totalAmount       Decimal     @db.Decimal(10, 2)
+  shippingAddress   String
+  trackingNumber    String?
+  carrier           String?
+  estimatedDelivery DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items             OrderItem[]
+  invoices          Invoice[]
+
+  @@index([userId])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+  productName String
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  userId        String
+  orderId       String?
+  amount        Decimal       @db.Decimal(10, 2)
+  status        InvoiceStatus @default(PENDING)
+  paymentMethod String        @default("Credit Card (**** 4242)")
+  refundStatus  String?
+  refundAmount  Decimal?      @db.Decimal(10, 2)
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime
+  paidAt        DateTime?
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order         Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([invoiceNumber])
+}
+
+model KnowledgeBase {
+  id          String   @id @default(cuid())
+  tenantId    String   @default("default_tenant") // Multi-tenant isolation for RAG
+  country     String?  // Optional regional isolation
+  language    String   @default("english") // PostgreSQL text search dictionary (e.g., 'english', 'spanish', 'french')
+  category    String
+  title       String
+  content     String   @db.Text
+  keywords    String[]
+  accessLevel String   @default("PUBLIC") // RBAC: PUBLIC, INTERNAL, ENTERPRISE
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // A single document is broken down into semantic chunks for highly targeted vector search.
+  chunks      KnowledgeBaseChunk[]
+
+  @@index([tenantId])
+  @@index([category])
+}
+
+// ---------------------------------------------------------------------------
+// RAG Implementation: Chunking & Vector Search
+// ---------------------------------------------------------------------------
+model KnowledgeBaseChunk {
+  id              String         @id @default(cuid())
+  knowledgeBaseId String
+  chunkIndex      Int            // Order of the chunk in the document
+  content         String         @db.Text
+  language        String         @default("english") // Inherited from KnowledgeBase to feed into PostgreSQL Trigger
+  
+  // Vector Embeddings: 768 dimensions for Ollama 'nomic-embed-text' (Industry standard open-source embedding)
+  // Can be configured to 1536 for OpenAI if needed via dynamic factory pattern in code, 
+  // but DB column size dictates the hard limit here.
+  embedding       Unsupported("vector(768)")?
+  
+  // Explicit Full-Text Search Vector column for GIN indexing
+  search_vector   Unsupported("tsvector")?
+  
+  createdAt       DateTime       @default(now())
+  
+  knowledgeBase   KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  
+  // Index for HNSW (Hierarchical Navigable Small World) for fast approximate nearest neighbor search
+  // @@index([embedding(ops: vector_cosine_ops)], type: Hnsw)
+  @@index([knowledgeBaseId])
+}
