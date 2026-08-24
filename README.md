@@ -1,24 +1,120 @@
-# Node AI Customer Support System
+<div align="center">
+  <h1>🤖 Enterprise Multi-Agent AI Customer Support</h1>
+  <p><strong>A production-ready AI orchestration platform built with Node.js, Vercel AI SDK, and PostgreSQL (pgvector).</strong></p>
+</div>
 
-Enterprise Multi-Agent AI Customer Support Platform — Node.js + Express + PostgreSQL + pgvector
+---
 
-## Advanced RAG (Retrieval-Augmented Generation) Architecture
+## 📖 Overview
 
-This project implements an enterprise-grade RAG pipeline to ensure the AI's answers are grounded in internal knowledge, strictly permissioned, and highly relevant.
+This project is an advanced, multi-agent customer support backend. Instead of relying on a single monolithic LLM prompt, it uses a **Router Agent** to classify user intent and delegate tasks to specialized **Sub-Agents** (Order Agent, Billing Agent, Support Agent). 
 
-### Pipeline Flow
-`Question -> Auth -> Tenant/Country Filtering -> Query Rewriting -> Hybrid Search -> RRF -> Context -> LLM`
+The platform features an **Enterprise-Grade Multilingual RAG (Retrieval-Augmented Generation) Pipeline** for answering policy questions, backed by a hybrid search engine in PostgreSQL.
 
-### Key Production Strategies Used:
-1. **Dynamic Embedding Factory:** (`src/services/embedding.factory.ts`) We abstracted the embedding generation. In production, this allows hot-swapping models (e.g., from OpenAI to local Ollama `nomic-embed-text`) without rewriting application logic. Currently uses 768 dimensions (industry standard for open-source embeddings).
-2. **Document Chunking Strategy:** (`src/services/ingestion.service.ts`) Rather than embedding a massive 3-page document (which dilutes semantic meaning), we use a Fixed-Size Chunking strategy with overlap. This guarantees that each vector strictly represents a narrow topic, dramatically improving retrieval accuracy.
-3. **Query Rewriting (Pre-Retrieval):** (`src/services/rag.service.ts`) User queries in chat are often vague (e.g. "how do I do it?"). We use a fast LLM pass to analyze the conversation history and rewrite the user's input into an optimized, keyword-rich search query before executing the search.
-4. **Tenant & Regional Filtering:** By passing the `userId` down to the RAG tool, we fetch the user's `tenantId` and `country`. The SQL search query enforces these filters, guaranteeing data isolation (crucial for B2B multi-tenant systems).
-5. **Hybrid Search & RRF (Reciprocal Rank Fusion):** We execute both a Vector Semantic Search (`<=>` operator via pgvector) and a Full-Text Keyword Search (`@@ to_tsquery`). To merge them fairly without score normalization bias, we calculate an RRF score directly within PostgreSQL.
+## 🚀 Key Features
 
-### Step-by-Step Implementation Guide
-1. **Database Schema Updates:** Added `tenantId` and `country` to the `User` and `KnowledgeBase` models to support multi-tenant isolation. Created `KnowledgeBaseChunk` with `vector(768)` to store granular document fragments.
-2. **Provider Abstraction:** Created `EmbeddingFactory` to wrap Vercel AI SDK's `embed` functions, allowing seamless switching between local Ollama embeddings and external providers like OpenAI.
-3. **Ingestion Service:** Built `IngestionService.ingestArticle` to automate the splitting of knowledge base articles into 1000-character chunks with a 200-character overlap. It generates embeddings and inserts them using Prisma `$executeRawUnsafe`.
-4. **RAG Service:** Built the `RagService.searchKnowledgeBase` orchestrator. It uses an LLM to rewrite the query based on chat history, generates the vector, and executes a complex PostgreSQL CTE (Common Table Expression) to perform the Hybrid Search and compute the RRF score on the fly.
-5. **Agent Integration:** Hooked the RAG service into the `SUPPORT` sub-agent via the `searchKnowledgeBase` tool. By passing the `userId` from the chat session dynamically down to the tool, the backend securely applies the user's tenant and regional filters to the RAG search.
+- **Multi-Agent Orchestration:** 
+  - `Classifier Agent`: Evaluates intents using Zod-enforced JSON schemas.
+  - `Router Agent`: Delegates tasks and maintains persistent conversation state.
+  - `Sub-Agents`: Specialized agents equipped with specific live-database tools (e.g., `getOrderStatus`, `searchKnowledgeBase`).
+- **Advanced RAG Pipeline:**
+  - **Query Rewriting:** Extracts core search intent from conversational chat.
+  - **Pre-Filtering:** Isolates data by `tenantId` (multi-tenancy) and `country` before vector math.
+  - **Hybrid Search:** Executes a single PostgreSQL CTE query combining **Vector Search** (`pgvector` / `HNSW`) and **Full-Text Keyword Search** (GIN Index).
+  - **Reciprocal Rank Fusion (RRF):** Mathematically merges vector and keyword results to eliminate score-normalization bias.
+  - **Multilingual Support:** Database triggers automatically cast language-specific dictionaries (English, Spanish, French) for perfect GIN word-stemming.
+  - **LLM-as-a-Judge Reranker:** A Cross-Encoder step that forces the LLM to read the Top 30 RRF candidates and score them 0-100 for absolute precision.
+- **Dynamic Embedding Factory:** Easily hot-swap between local Ollama (`nomic-embed-text`) and OpenAI/Google models with zero application code changes.
+- **Live Database Integration:** Real-time PostgreSQL tool execution for Order Tracking and Invoice lookups.
+
+## 🛠️ Technology Stack
+
+- **Backend:** Node.js, Express, TypeScript, Zod
+- **AI / LLM:** Vercel AI SDK, Ollama (Local), Google Gemini (Fallback)
+- **Database:** PostgreSQL (with `pgvector`)
+- **ORM:** Prisma
+
+---
+
+## ⚙️ Local Setup & Installation
+
+### 1. Prerequisites
+- [Node.js](https://nodejs.org/) (v18+)
+- [Docker & Docker Compose](https://www.docker.com/) (for PostgreSQL + pgvector)
+- [Ollama](https://ollama.com/) (Optional, if running local models)
+
+### 2. Environment Variables
+Create a `.env` file in the root directory:
+```env
+# Database
+DATABASE_URL="postgresql://postgres:postgres@localhost:5455/swadesh_support_db?schema=public"
+
+# AI Providers (Optional if using Ollama)
+OPENAI_API_KEY="sk-..."
+GOOGLE_GENERATIVE_AI_API_KEY="AIza..."
+
+# Environment Config
+EMBEDDING_PROVIDER="ollama" 
+EMBEDDING_MODEL="nomic-embed-text"
+AI_MODEL="gemini-3.6-flash"
+```
+
+### 3. Start Database & Install Dependencies
+Start the PostgreSQL container:
+```bash
+docker compose up -d
+```
+Install Node modules:
+```bash
+npm install
+```
+
+### 4. Database Schema & Vector Indexes
+Push the Prisma schema to the database:
+```bash
+npm run db:push
+```
+Run the setup script to create the explicit `search_vector` column, GIN indexes, and Database Triggers for Hybrid Search:
+```bash
+npx tsx scripts/add-explicit-search-vector.ts
+```
+
+### 5. Seed & Ingest Knowledge Base
+Seed the database with mock Customers, Orders, and Multilingual Knowledge Base articles:
+```bash
+npm run db:seed
+```
+Run the ingestion script to chunk the documents and generate vector embeddings:
+```bash
+npx tsx scripts/ingest-all.ts
+```
+
+### 6. Start the Server
+```bash
+npm run dev
+```
+
+---
+
+## 🧪 Testing the RAG Pipeline
+
+You can directly test the Hybrid Search + Reranker pipeline via the CLI test script. This bypasses the chat interface to give you vivid debug output of the RRF scores, Vector Ranks, and Keyword Ranks.
+
+```bash
+npx tsx scripts/test-rag.ts
+```
+
+## 🏗️ Architecture Design (RAG)
+```mermaid
+graph TD;
+    A[User Query] --> B[Query Rewriter]
+    B --> C{Tenant/Country Filter}
+    C --> D[HNSW Vector Search]
+    C --> E[GIN Keyword Search]
+    D --> F[Reciprocal Rank Fusion]
+    E --> F
+    F --> G(Top 30 Candidates)
+    G --> H[LLM Cross-Encoder Reranker]
+    H --> I(Top 2 Contexts)
+    I --> J[Final LLM Generation]
+```
