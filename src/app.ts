@@ -26,14 +26,22 @@ app.use(morgan("dev"));
 // Parse JSON request bodies (replaces Hono's c.req.json())
 app.use(express.json());
 
-// CORS configuration (replaces Hono's cors() middleware)
+// Parse CORS Origins from environment or defaults
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim())
+  : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
+
+// CORS configuration
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:3000",
-    ],
+    origin: (origin, callback) => {
+      // Allow server-to-server, curl, and ALB health check requests without origin header
+      if (!origin) return callback(null, true);
+      if (corsOrigins.includes("*") || corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-User-Id"],
   })
@@ -46,6 +54,8 @@ app.use("/api", createRateLimiter({ maxRequests: 100, windowMs: 60 * 1000 }));
 // Routes
 // ---------------------------------------------------------------------------
 
+// Root health check for AWS ALB / ECS Target Group monitoring
+app.use("/", healthRoutes);
 app.use("/api", healthRoutes);
 app.use("/api", agentRoutes);
 app.use("/api", userRoutes);

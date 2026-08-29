@@ -7,7 +7,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { SamplePrompts } from "./SamplePrompts";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import type { UserProfile } from "../api/client";
+import { API_BASE, type UserProfile } from "../api/client";
 
 interface ChatAreaProps {
   initialMessages: ChatMessage[];
@@ -23,11 +23,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onConversationCreated,
 }) => {
   const [preferredAgent, setPreferredAgent] = useState<AgentType | undefined>(undefined);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const mappedInitialMessages = initialMessages.map(msg => ({
     id: msg.id,
-    role: msg.role as 'user' | 'assistant',
+    role: msg.role === 'assistant' ? 'assistant' : msg.role === 'user' ? 'user' : 'system',
     content: msg.content,
     createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
     toolInvocations: msg.toolCalls?.map(tc => ({
@@ -37,7 +36,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       state: 'result' as const,
       result: 'Success',
     })) || [],
-    // Attach original DB fields to metadata so we can still render them if needed
     data: {
       agentType: msg.agentType,
       reasoningSteps: msg.reasoningSteps,
@@ -45,14 +43,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   }));
 
   const [input, setInput] = useState("");
-  
   const newConvIdRef = useRef<string | null>(null);
 
   const chatContext = useChat({
     id: activeConversationId || "new",
     messages: mappedInitialMessages as any,
     transport: new DefaultChatTransport({
-      api: "/api/chat/messages",
+      api: `${API_BASE}/chat/messages`,
       headers: {
         "X-User-Id": currentUser?.id || "",
         "Authorization": `Bearer ${currentUser?.id}`,
@@ -68,7 +65,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         
         console.log("[ChatArea] Sending message with user ID:", currentUser?.id, "to URL:", url);
         
-        const response = await fetch("/api/chat/messages", {
+        const response = await fetch(`${API_BASE}/chat/messages`, {
           ...options,
           headers: headers,
         });
@@ -89,54 +86,88 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   });
 
-  const { messages, status, error, append, sendMessage, setMessages } = chatContext as any;
-  const isLoading = status === 'submitted' || status === 'streaming';
+  const { messages, setMessages, append, sendMessage, status, error } = chatContext as any;
+  const isLoading = status === "submitted" || status === "streaming";
 
-  // Sync initialMessages with useChat's state when they change (e.g. after async load)
   useEffect(() => {
     if (setMessages && mappedInitialMessages.length > 0) {
-      // Only sync if useChat's messages are empty, or if we are explicitly loading a new history
       if (messages.length === 0 || mappedInitialMessages.length > messages.length) {
-        setMessages(mappedInitialMessages);
+        setMessages(mappedInitialMessages as any);
       }
     }
-  }, [initialMessages]); // depend on the raw prop to avoid infinite loops from mapping
+  }, [activeConversationId, initialMessages]);
 
-  const handleSend = (text: string) => {
-    if (!text?.trim() || isLoading) return;
-    
-    if (append) {
-      append({ role: 'user', content: text });
-    } else if (sendMessage) {
-      sendMessage({ role: 'user', content: text });
-    }
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoading]);
+
+  const handleSend = async (textToSend?: string) => {
+    const text = textToSend || input;
+    if (!text.trim() || isLoading) return;
     
     setInput("");
+    if (append) {
+      await append({
+        role: "user",
+        content: text,
+      });
+    } else if (sendMessage) {
+      await sendMessage({
+        role: "user",
+        content: text,
+      });
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleSend(input);
+    handleSend();
   };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
 
   return (
-    <main className="flex-1 flex flex-col h-full bg-slate-950 relative overflow-hidden">
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-6">
+    <div className="flex-1 flex flex-col h-full bg-slate-900/50 relative overflow-hidden">
+      <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/80 backdrop-blur-md z-10">
+        <div>
+          <h1 className="text-sm font-semibold text-white flex items-center gap-2">
+            Support Chat
+            {activeConversationId ? (
+              <span className="text-xs font-normal text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
+                Ticket: {activeConversationId.slice(-6)}
+              </span>
+            ) : (
+              <span className="text-xs font-normal text-indigo-400 bg-indigo-950/60 border border-indigo-800/60 px-2 py-0.5 rounded-full">
+                New Session
+              </span>
+            )}
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-400">Force Agent:</span>
+          <select
+            value={preferredAgent || ""}
+            onChange={(e) =>
+              setPreferredAgent((e.target.value as AgentType) || undefined)
+            }
+            className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer"
+          >
+            <option value="">Auto Router (Default)</option>
+            <option value="SUPPORT">General Support</option>
+            <option value="ORDER">Order Management</option>
+            <option value="BILLING">Billing & Refunds</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center py-12">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4 shadow-xl shadow-indigo-500/10">
-              <Bot className="w-8 h-8" />
+          <div className="h-full flex flex-col items-center justify-center text-center p-8">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 shadow-inner">
+              <Sparkles size={24} />
             </div>
-            <h2 className="text-xl font-bold text-slate-100 mb-2">
+            <h2 className="text-base font-semibold text-white mb-1">
               AI Multi-Agent Support System
             </h2>
             <p className="text-xs text-slate-400 max-w-md mb-8 leading-relaxed">
@@ -145,12 +176,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             <SamplePrompts onSelectPrompt={(prompt) => handleSend(prompt)} />
           </div>
         ) : (
-          messages.map((msg) => {
+          messages.map((msg: any) => {
             console.log("[ChatArea] rendering message:", msg);
             const isUser = msg.role === "user";
-            // Check if it has our custom data (from initialMessages DB records)
             const agentType = (msg as any).data?.agentType || (msg as any).agentType || "ROUTER";
-            const reasoningSteps = (msg as any).data?.reasoningSteps || [];
 
             return (
               <div
@@ -360,6 +389,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </form>
       </div>
-    </main>
+    </div>
   );
 };
