@@ -1,4 +1,4 @@
-name: CI/CD Pipeline - Deploy to AWS ECS
+name: CI/CD Pipeline - Deploy Backend to ECS & Frontend to S3
 
 on:
   push:
@@ -13,6 +13,7 @@ env:
   ECR_REPOSITORY: node-ai-backend
   ECS_CLUSTER: node-ai-cluster
   ECS_SERVICE: node-ai-backend-service
+  S3_BUCKET: node-ai-frontend-587762853631
 
 jobs:
   # ==========================================
@@ -31,7 +32,7 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Backend Dependencies
         run: npm ci
 
       - name: Generate Prisma Client
@@ -44,11 +45,11 @@ jobs:
         run: npm test -- --passWithNoTests
 
   # ==========================================
-  # STAGE 2: Build Docker Image & Deploy to ECS
+  # STAGE 2: Build & Deploy Backend + Frontend
   # (Only runs on push to main branch)
   # ==========================================
   deploy:
-    name: 🚀 Build, Push & Deploy to ECS
+    name: 🚀 Deploy Backend (ECS) & Frontend (S3)
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -56,6 +57,11 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -71,7 +77,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build, Tag and Push Image to Amazon ECR
+      # --- 1. Build & Push Backend Docker Image ---
+      - name: Build, Tag and Push Backend Image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -87,7 +94,8 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Deploy to Amazon ECS (Zero-Downtime Rolling Update)
+      # --- 2. Trigger ECS Rolling Update ---
+      - name: Deploy Backend to Amazon ECS
         run: |
           echo "Triggering zero-downtime rolling update on ECS..."
           aws ecs update-service \
@@ -96,5 +104,43 @@ jobs:
             --force-new-deployment \
             --region $AWS_REGION
 
-      - name: Deployment Succeeded
-        run: echo "✅ Successfully deployed new release to AWS ECS Fargate!"
+          echo "Waiting for new ECS Task to reach RUNNING status..."
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --region $AWS_REGION
+
+      # --- 3. Get New Task Public IP ---
+      - name: Fetch Live Backend Public IP
+        id: get-ip
+        run: |
+          TASK_ARN=$(aws ecs list-tasks --cluster $ECS_CLUSTER --service-name $ECS_SERVICE --desired-status RUNNING --region $AWS_REGION --query "taskArns[0]" --output text)
+          echo "Task ARN: $TASK_ARN"
+
+          ENI_ID=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --region $AWS_REGION --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
+          echo "ENI ID: $ENI_ID"
+
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID --region $AWS_REGION --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+          echo "Live Backend Public IP: $PUBLIC_IP"
+          echo "backend_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      # --- 4. Build & Sync React Frontend to S3 with the New IP ---
+      - name: Build & Deploy Frontend to S3
+        env:
+          BACKEND_IP: ${{ steps.get-ip.outputs.backend_ip }}
+        run: |
+          echo "Building React Client with VITE_API_URL=http://${BACKEND_IP}:3001..."
+          cd client
+          npm ci
+          VITE_API_URL="http://${BACKEND_IP}:3001" npm run build
+
+          echo "Syncing build artifacts to S3 Bucket: $S3_BUCKET..."
+          aws s3 sync dist/ s3://$S3_BUCKET --delete --region $AWS_REGION
+
+      - name: Full Deployment Succeeded
+        run: |
+          echo "============================================================"
+          echo "🎉 DEPLOYMENT COMPLETE!"
+          echo "Frontend Live: http://${{ env.S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Backend Live:  http://${{ steps.get-ip.outputs.backend_ip }}:3001/health"
+          echo "============================================================"
