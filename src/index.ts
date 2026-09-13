@@ -9,4 +9,5 @@ app.listen(port, () => {
   console.log(`🚀 Node AI Customer Support API is running on http://localhost:${port}`);
   console.log(`📖 Health Check: http://localhost:${port}/api/health`);
   console.log(`🤖 Agents Directory: http://localhost:${port}/api/agents`);
+  // CI/CD Automated Verification: ECS Fargate + S3 CloudFront Pipeline Active
 });

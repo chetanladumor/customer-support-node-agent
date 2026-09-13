@@ -19,7 +19,7 @@ export class ClassifierAgent {
     userMessage: string,
     conversationHistory: string
   ): Promise<ClassificationResult> {
-    
+
     // Zod schema defines exactly the JSON shape we want back from the LLM
     const classificationSchema = z.object({
       scores: z.object({
@@ -32,7 +32,7 @@ export class ClassifierAgent {
     });
     let object: any;
     try {
-      await fetch("http://host.docker.internal:11434/");
+      await fetch("http://host.docker.internal:11434/");// // 1. Check if local Ollama is running on the host machine
       const result = await generateObject({
         model: ollama("llama3.1"),
         schema: classificationSchema,
