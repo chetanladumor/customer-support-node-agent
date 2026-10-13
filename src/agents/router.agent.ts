@@ -15,9 +15,11 @@ const ollama = createOpenAI({
 export class RouterAgent {
   static async handleIncomingMessageStream(
     conversationId: string,
-    userId: string,
+    user: { id: string; name?: string; email?: string } | string,
     userMessage: string
   ) {
+    const userId = typeof user === "string" ? user : user.id;
+    const userProfile = typeof user === "string" ? { id: user, name: "Customer" } : user;
     const reasoningSteps: ReasoningStep[] = [];
     
     // 1. Fetch History & Context
@@ -30,7 +32,7 @@ export class RouterAgent {
     const selectedAgentType = classification.agentType;
 
     // 3. Delegate to Sub-Agent
-    const subAgentsConfig = getSubAgents(userId);
+    const subAgentsConfig = getSubAgents(userProfile);
     const subAgentConfig = subAgentsConfig[selectedAgentType as keyof typeof subAgentsConfig] || subAgentsConfig.SUPPORT;
     const systemPromptWithContext = ContextManager.buildSystemPrompt(subAgentConfig.systemPrompt, previousState);
 

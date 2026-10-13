@@ -77,8 +77,48 @@ describe('DatabaseTools', () => {
       expect(result.order?.status).toBe('SHIPPED');
       expect(result.order?.items.length).toBe(1);
     });
-    it('returns formatted order details if found', async () => {
-      // (previous test logic remains intact, this chunk assumes it's right before searchKnowledgeBase)
+
+    it('resolves order when alias id is passed instead of orderNumber', async () => {
+      const mockOrder = {
+        id: '1',
+        orderNumber: 'ORDER-1003',
+        userId: 'user_1',
+        status: 'PROCESSING',
+        totalAmount: 3499 as any,
+        estimatedDelivery: new Date('2026-10-05'),
+        carrier: 'UPS',
+        trackingNumber: 'UPS-999',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        items: []
+      };
+
+      prismaMock.order.findFirst.mockResolvedValue(mockOrder as any);
+
+      const result = await DatabaseTools.getOrderStatus({
+        id: 'ORDER-1003',
+        userId: 'user_1'
+      });
+
+      expect(prismaMock.order.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            orderNumber: 'ORDER-1003',
+            userId: 'user_1',
+          },
+        })
+      );
+      expect(result.success).toBe(true);
+      expect(result.order?.orderNumber).toBe('ORDER-1003');
+    });
+
+    it('returns error if neither orderNumber nor id is provided', async () => {
+      const result = await DatabaseTools.getOrderStatus({
+        userId: 'user_1'
+      } as any);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order number is required.');
     });
   });
 

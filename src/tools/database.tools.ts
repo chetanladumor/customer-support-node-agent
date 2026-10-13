@@ -11,8 +11,16 @@ export class DatabaseTools {
   /**
    * Look up an order by its orderNumber and verify it belongs to the user
    */
-  static async getOrderStatus(args: { orderNumber: string; userId: string }) {
-    const { orderNumber, userId } = args;
+  static async getOrderStatus(args: { orderNumber?: string; id?: string; orderId?: string; userId: string }) {
+    const orderNumber = args.orderNumber || args.id || args.orderId;
+    const { userId } = args;
+
+    if (!orderNumber) {
+      return {
+        success: false,
+        error: "Order number is required.",
+      };
+    }
     
     console.log(`[Tool: getOrderStatus] Looking up ${orderNumber} for user ${userId}`);
 
@@ -83,8 +91,16 @@ export class DatabaseTools {
   /**
    * Look up an invoice by its invoiceNumber
    */
-  static async getInvoiceDetails(args: { invoiceNumber: string; userId: string }) {
-    const { invoiceNumber, userId } = args;
+  static async getInvoiceDetails(args: { invoiceNumber?: string; id?: string; invoiceId?: string; userId: string }) {
+    const invoiceNumber = args.invoiceNumber || args.id || args.invoiceId;
+    const { userId } = args;
+
+    if (!invoiceNumber) {
+      return {
+        success: false,
+        error: "Invoice number is required.",
+      };
+    }
 
     console.log(`[Tool: getInvoiceDetails] Looking up ${invoiceNumber} for user ${userId}`);
 
@@ -124,8 +140,16 @@ export class DatabaseTools {
   /**
    * Look up an invoice by its related Order ID
    */
-  static async getInvoiceByOrder(args: { orderNumber: string; userId: string }) {
-    const { orderNumber, userId } = args;
+  static async getInvoiceByOrder(args: { orderNumber?: string; id?: string; orderId?: string; userId: string }) {
+    const orderNumber = args.orderNumber || args.id || args.orderId;
+    const { userId } = args;
+
+    if (!orderNumber) {
+      return {
+        success: false,
+        error: "Order number is required.",
+      };
+    }
 
     console.log(`[Tool: getInvoiceByOrder] Looking up invoice for order ${orderNumber} for user ${userId}`);
 

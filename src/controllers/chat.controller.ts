@@ -74,7 +74,7 @@ export class ChatController {
     // 3. Hand off to the Orchestration Engine for streaming
     const stream = await RouterAgent.handleIncomingMessageStream(
       conversation.id,
-      userId,
+      req.user || userId,
       content
     );
 

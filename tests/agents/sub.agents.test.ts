@@ -48,4 +48,16 @@ describe('Sub Agents', () => {
     await agents.SUPPORT.tools.searchKnowledgeBase.execute({ query: 'policy', language: 'en' });
     expect(DatabaseToolsMock.searchKnowledgeBase).toHaveBeenCalledWith({ query: 'policy', language: 'en', userId: 'user_1' });
   });
+
+  it('injects authenticated customer name and privacy rules into ORDER and BILLING system prompts', () => {
+    const userProfile = { id: 'user_chetan_1', name: 'ChetanKumar Ladumor', email: 'ladumor@example.com' };
+    const agents = getSubAgents(userProfile);
+
+    expect(agents.ORDER.systemPrompt).toContain('ChetanKumar Ladumor');
+    expect(agents.ORDER.systemPrompt).toContain('PRIVACY & SECURITY');
+    expect(agents.ORDER.systemPrompt).toContain('STRICTLY REFUSE');
+
+    expect(agents.BILLING.systemPrompt).toContain('ChetanKumar Ladumor');
+    expect(agents.BILLING.systemPrompt).toContain('PRIVACY & SECURITY');
+  });
 });
