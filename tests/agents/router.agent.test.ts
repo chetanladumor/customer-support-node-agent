@@ -87,7 +87,8 @@ describe('Router Agent', () => {
     await streamCall.onFinish({ 
       text: 'Order is on the way', 
       toolCalls: [{ toolCallId: '1', toolName: 'test', args: {} }], 
-      toolResults: [] 
+      toolResults: [],
+      usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 }
     });
 
     expect(ChatServiceMock.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -98,7 +99,16 @@ describe('Router Agent', () => {
       toolCalls: expect.arrayContaining([
         expect.objectContaining({ id: '1', name: 'test' })
       ]),
-      metadata: { currentOrderId: '123' }
+      metadata: expect.objectContaining({
+        currentOrderId: '123',
+        tokenUsage: expect.objectContaining({
+          inputTokens: 200,
+          outputTokens: 80,
+          totalTokens: 280,
+          ratesApplied: expect.any(Object),
+          cost: expect.any(Object),
+        })
+      })
     }));
   });
 

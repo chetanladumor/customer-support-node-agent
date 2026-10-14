@@ -86,12 +86,32 @@ export interface HealthCheckResponse {
 // NEW INTELLIGENCE FIXES (Phase 7)
 // ---------------------------------------------------------------------------
 
+// Token and Cost Analytics Record
+export interface TokenUsageRecord {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  ratesApplied: {
+    inputPerMillion: number;
+    outputPerMillion: number;
+    currency: string;
+  };
+  cost: {
+    inputCost: number;
+    outputCost: number;
+    totalCost: number;
+    currency: string;
+  };
+}
+
 // Fix #4: Conversation State (follow-up context tracking)
 export interface ConversationState {
   lastMentionedOrderId: string | null;
   lastMentionedInvoiceId: string | null;
   lastAgent: AgentType | null;
   recentTopic: string | null;
+  tokenUsage?: TokenUsageRecord;
 }
 
 // Fix #2: Single Classifier (intent classification result)

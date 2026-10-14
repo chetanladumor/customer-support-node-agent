@@ -5,6 +5,7 @@ import { ClassifierAgent } from "./classifier.agent.js";
 import { ContextManager } from "./context.manager.js";
 import { getSubAgents } from "./sub.agents.js";
 import { ChatService } from "../services/chat.service.js";
+import { TokenCostService } from "../services/token-cost.service.js";
 import type { AgentType, ReasoningStep, ToolCallRecord, SendMessageResponse } from "../shared/types.js";
 
 const ollama = createOpenAI({
@@ -43,13 +44,15 @@ export class RouterAgent {
     coreMessages.push({ role: "user", content: userMessage });
 
     let selectedModel: any;
+    let modelName = process.env.AI_MODEL || "gemini-3.6-flash";
     try {
       await fetch("http://host.docker.internal:11434/");
       selectedModel = ollama("llama3.1");
+      modelName = "llama3.1";
       console.log("[ROUTER] Using local Ollama model");
     } catch (e) {
       console.log("[ROUTER] Local Ollama not available, falling back to Google API");
-      selectedModel = google(process.env.AI_MODEL || "gemini-3.6-flash");
+      selectedModel = google(modelName);
     }
 
     // Call the AI SDK with streamText
@@ -59,7 +62,7 @@ export class RouterAgent {
       messages: coreMessages,
       tools: subAgentConfig.tools as any,
       stopWhen: isStepCount(5),
-      onFinish: async ({ text, toolCalls, toolResults }) => {
+      onFinish: async ({ text, toolCalls, toolResults, usage }: any) => {
         const formattedToolCalls: ToolCallRecord[] = [];
         
         if (toolCalls && toolCalls.length > 0) {
@@ -74,8 +77,23 @@ export class RouterAgent {
           }
         }
         
-        // Save the generated response to the database
-        const newState = ContextManager.extractNewState(userMessage, text, previousState, selectedAgentType);
+        // Calculate dynamic token usage and cost
+        const promptTokens = usage?.promptTokens ?? 0;
+        const completionTokens = usage?.completionTokens ?? 0;
+        const totalTokens = usage?.totalTokens ?? (promptTokens + completionTokens);
+
+        const tokenUsage = TokenCostService.calculateCost(modelName, {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+        });
+
+        // Save the generated response to the database with token usage analytics
+        const baseState = ContextManager.extractNewState(userMessage, text, previousState, selectedAgentType);
+        const newState = {
+          ...baseState,
+          tokenUsage,
+        };
         
         await ChatService.saveMessage({
           conversationId,
